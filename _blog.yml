@@ -4955,3 +4955,14 @@
     - nlp
     - open-source
     - collaboration
+
+- local: liger-kernel
+  title: "Supercharge LLM Training with Liger Kernel"
+  author: sshimizu
+  thumbnail: /blog/assets/liger-kernel/thumbnail.png
+  date: November 2, 2024
+  tags:
+    - transformers
+    - open-source
+    - triton
+    - kernels
