@@ -2,24 +2,38 @@
 title: "Supercharge LLM Training with Liger Kernel" 
 thumbnail: /blog/assets/liger-kernel/thumbnail.gif
 authors:
-- user: Jason Zhu
 - user: Steven Shimizu
+- user: Jason Zhu
 ---
 
 # Supercharge LLM Training with Liger Kernel 🚀
 
-Training large language models (LLMs) is resource-intensive, requiring significant time and memory. Liger Kernel helps solve this problem by providing highly efficient Triton-based kernels designed to significantly speed up training and reduce memory usage, especially in multi-GPU environments. With integration into Hugging Face's libraries, you can seamlessly optimize your LLM training without sacrificing accuracy in just a few lines of code.
+Training large language models (LLMs) is GPU resource-intensive, requiring significant time and memory. Liger Kernel helps solve this problem by providing highly efficient Triton-based kernels designed to significantly speed up training and reduce memory usage, especially in multi-GPU environments. With integration into Hugging Face's libraries, you can seamlessly optimize your LLM training without sacrificing accuracy in just a few lines of code.
 
 ## Benchmarking
 
-| Model            | Original Model | Original Model + Liger | Speedup | VRAM reduction |
-|------------------|----------------|------------------------|---------|----------------|
-| LLaMA 3.1 8B     | 1x             |                        |         |                |
+We conducted end-to-end training benchmarks using four NVIDIA A100 GPUs (80 GB each) to fine-tune multiple large language models (LLMs), including LLaMA 3-8B, Qwen2, Gemma, Mistral, and Phi3, on the Alpaca dataset. Sequence length was fixed at 512 tokens and the batch size was varied. We compared the throughput and memory usage of the original Hugging Face model implementations with and without Liger Kernel applied.
 
+The following figure shows a typical result with Gemma2, which has a large vocab size (256K). Applying Liger Kernel not only improves throughput by 12%, but also reduces memory usage by 52% at a batch size of 32. This allows training with smaller GPUs, larger batch sizes, or longer sequence lengths without encountering OOM issues, which can futher improve overall resource and training efficiency.
 
-TODO: Fill in the numbers
+<figure style="text-align: center;">
+  <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/blog/liger-kernel/gemma2_tps_memory_comparison.png" alt="Comparison of throughput and memory for Gemma2 fine-tuning with and without Liger Kernel applied" style="width: 100%;"/>
+  <figcaption>Comparison of throughput and memory for Gemma2 fine-tuning with and without Liger Kernel applied.</figcaption>
+</figure>
+
+The following table summarizes the throughput (tokens/sec) improvement and GPU memory reduction when applying Liger. results for other models (for specific batch sizes). The full benchmarking details and results are discussed in https://arxiv.org/abs/2410.10989. Example benchmarking scripts can be found here: 
+
+| Model            | Throughput (tokens/sec) Improvement with Liger Kernel | VRAM Reduction with Liger Kernel |
+|------------------|-------------------------------------------------------|----------------------------------|
+| LLaMA 3 8B       | +43%                                                  | -55%                             |
+| Qwen2            | +26%                                                  | -57%                             |  
+| Gemma2           | +12%                                                  | -52%                             |
+| Mistral          | +27%                                                  | -21%                             |
+| Phi3             | +17%                                                  | -13%                             |
+
 
 ## Usage
+
 Liger Kernel contains PyTorch `nn.Module` implementations built on Triton kernels, and these are compliant with the API of several common LLM layers present in `transformers` modeling code. For example, layers such as RMSNorm, RoPE, SwiGLU, and CrossEntropy have corresponding Liger Kernel implementations that can be patched to significantly boost throughput and reduce memory usage during training.
 
 While many of the models in the `transformers` code base reuse implementations from some base models (e.g. `LLaMA`), there may be slight differences in the layers. Thus, we provide model-specific monkey patch APIs that have been thoroughly tested for accuracy and performance. At the time of writing, the following models are supported:
@@ -71,10 +85,6 @@ trainer = Trainer(
 )
 trainer.train()
 ```
-
-TODO: Test with TRL flag, validate code
-TODO: Add collab links
-TODO: Add links to other ways of using Liger Kernel
 
 ## Use Case with Medusa Framework: Multiple Decoding Heads
 
