@@ -4959,6 +4959,7 @@
 - local: liger-kernel
   title: "Supercharge LLM Training with Liger Kernel"
   author: sshimizu
+  guest: true
   thumbnail: /blog/assets/liger-kernel/thumbnail.png
   date: November 2, 2024
   tags:

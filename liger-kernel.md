@@ -2,8 +2,8 @@
 title: "Supercharge LLM Training with Liger Kernel" 
 thumbnail: /blog/assets/liger-kernel/thumbnail.gif
 authors:
+- user: Byron Hsu
 - user: Steven Shimizu
-- user: Jason Zhu
 ---
 
 # Supercharge LLM Training with Liger Kernel 🚀
@@ -14,7 +14,7 @@ Training large language models (LLMs) is GPU resource-intensive, requiring signi
 
 We conducted end-to-end training benchmarks using four NVIDIA A100 GPUs (80 GB each) to fine-tune multiple large language models (LLMs), including LLaMA 3-8B, Qwen2, Gemma, Mistral, and Phi3, on the Alpaca dataset. Sequence length was fixed at 512 tokens and the batch size was varied. We compared the throughput and memory usage of the original Hugging Face model implementations with and without Liger Kernel applied.
 
-The following figure shows a typical result with Gemma2, which has a large vocab size (256K). Applying Liger Kernel not only improves throughput by 12%, but also reduces memory usage by 52% at a batch size of 32. This allows training with smaller GPUs, larger batch sizes, or longer sequence lengths without encountering OOM issues, which can futher improve overall resource and training efficiency.
+Our benchmarking illustrates Liger's impact across various batch sizes and model architectures. Below is a typical result with Gemma2, a model with a large vocab size (256K). Applying Liger Kernel not only improves throughput by 12%, but also reduces memory usage by 52% at a batch size of 32. This allows training with smaller GPUs, larger batch sizes, or longer sequence lengths without encountering OOM issues, which can futher improve overall resource and training efficiency.
 
 <figure style="text-align: center;">
   <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/blog/liger-kernel/gemma2_tps_memory_comparison.png" alt="Comparison of throughput and memory for Gemma2 fine-tuning with and without Liger Kernel applied" style="width: 100%;"/>
@@ -56,41 +56,85 @@ If you are using a CausalLM type of model, the `AutoLigerKernelForCausalLM` clas
 from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
 model = AutoLigerKernelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B")
+
+# Train the model as usual
 ```
 
 ### HuggingFace Trainer Integration
 
-As an alternative to patching the model before training, you can also provide a `use_liger` flag to the `transformers`' `Trainer` class to automatically apply the Liger Kernel optimizations.
+As an alternative to patching the model before training, you can also set the `use_liger_kernel` flag in the `transformers`' `Trainer` class to automatically apply the Liger Kernel optimizations. This requires `transformers` version >=4.45.0.
 
 ```python
-from transformers import Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained(
-    "meta-llama/Llama-3.1-8B",
-    trust_remote_code=True,
+# Load Llama-3.1 model, which is supported by Liger Kernel
+model_path = "meta-llama/Llama-3.1-8B"
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+model = AutoModelForCausalLM.from_pretrained(model_path)
+
+
+dataset = load_dataset("stanfordnlp/imdb", split="train")
+
+def tokenize_function(examples):
+    tokens = tokenizer(
+        examples["text"],
+        truncation=True,
+        max_length=128,
+        padding="max_length",
+    )
+    tokens["labels"] = tokens["input_ids"].copy()
+    return tokens
+
+tokenized_dataset = dataset.map(tokenize_function, batched=True)
+
+training_args = TrainingArguments(
+    output_dir="/tmp",
+    per_device_train_batch_size=32,
+    learning_rate=5e-5,
+    num_train_epochs=1,
+    use_liger_kernel=True  # Enable Liger optimization for training
 )
 
 trainer = Trainer(
     model=model,
-    args=TrainingArguments(
-        output_dir="./llama_finetuning",
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=32,
-        num_train_epochs=1,
-        use_liger=True,
-    ),
-    train_dataset=dataset["train"],
-    eval_dataset=dataset["validation"],
+    args=training_args,
+    train_dataset=tokenized_dataset
+)
+
+# Train the model
+trainer.train()
+```
+
+### TRL SFTTrainer Integration
+
+The `SFTTrainer` from the `trl` library simplifies the process of fine-tuning large language models. By simply passing the `use_liger` flag to the `SFTTrainer`, it will automatically apply the Liger Kernel optimizations on the specified model.
+
+```python
+from datasets import load_dataset
+from trl import SFTConfig, SFTTrainer
+
+dataset = load_dataset("stanfordnlp/imdb", split="train")
+
+training_args = SFTConfig(
+    max_seq_length=512,
+    output_dir="/tmp",
+    use_liger_kernel=True,
+)
+trainer = SFTTrainer(
+    "meta-llama/Llama-3.1-8B",
+    train_dataset=dataset,
+    args=training_args,
 )
 trainer.train()
 ```
 
-## Use Case with Medusa Framework: Multiple Decoding Heads
+### Advanced Integration Options
 
-Medusa [[repo](https://github.com/FasterDecoding/Medusa)], [[paper](https://arxiv.org/abs/2401.10774)] is a simple frameowrk for accelerating decoding in transformer models. It adds extra "heads" to the LLM to predict multiple future tokens simultaneously, thus speeding up LLM generation.
+If you’re working with new model architectures or want finer control, you can directly use the optimized `nn.Module` layers or Triton ops provided by Liger Kernel to fit your specific needs. For details on patching layers and customizing Triton ops for advanced integration, check out the [GitHub repository docs](https://github.com/linkedin/Liger-Kernel?tab=readme-ov-file#3-compose-your-own-model).
 
-When augmenting a model with Medusa, you start with an existing fine-tuned or pre-trained model and add extra heads to the model, keeping the original model weights frozen. The introduction of multiple heads can easily lead to OOM (Out of Memory) issues. However, thanks to the efficient Liger fused CE, which calculates the gradient in place and doesn't materialize the logits, we have observed very effective results. This efficiency opens up more opportunities for multi-token prediction research and development.
+## Conclusion
 
-TODO: Example code
-TODO: Results
+Liger Kernel is a powerful solution for making large language model training more efficient. With Triton-based kernels optimized for common LLM layers, it boosts throughput and reduces memory usage, enabling faster training and better resource utilization. Integrated seamlessly with Hugging Face's libraries, Liger Kernel optimizations can be applied in just a few lines of code, helping to accelerate LLM development.
+
+Whether you're exploring Liger Kernel for the first time or ready to contribute new kernels, bug fixes or insights, your involvement helps push model efficiency forward for everyone. Join the Liger community on [GitHub](https://github.com/linkedin/Liger-Kernel)!
